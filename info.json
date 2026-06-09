@@ -1,0 +1,8 @@
+{
+  "name": "factorio-ai-exporter",
+  "version": "0.1.0",
+  "title": "AI Exporter",
+  "author": "webber",
+  "description": "Exports factory state as structured JSON + screenshots for AI analysis.",
+  "dependencies": ["base >= 2.0.0"]
+}

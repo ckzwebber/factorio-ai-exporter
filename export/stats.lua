@@ -18,15 +18,13 @@ function M.collect(surface_name)
     for _, win in ipairs(WINDOWS) do
       entry[win.key .. "_produced"] = stats.get_flow_count{
         name            = item_name,
-        input           = true,
+        category        = "input",
         precision_index = win.index,
-        sample_index    = 1,
       }
       entry[win.key .. "_consumed"] = stats.get_flow_count{
         name            = item_name,
-        input           = false,
+        category        = "output",
         precision_index = win.index,
-        sample_index    = 1,
       }
     end
 
@@ -44,9 +42,8 @@ function M.collect(surface_name)
         entry[win.key .. "_produced"] = 0
         entry[win.key .. "_consumed"] = stats.get_flow_count{
           name            = item_name,
-          input           = false,
+          category        = "output",
           precision_index = win.index,
-          sample_index    = 1,
         }
       end
       result[item_name] = entry

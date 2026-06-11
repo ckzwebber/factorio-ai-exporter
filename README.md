@@ -34,11 +34,11 @@ O mod vai:
 2. Processar 5 chunks por tick para não causar lag.
 3. Ao terminar, gerar os arquivos em `script-output/ai-export/`:
    - `context.json` — dados completos da fábrica
-   - `map_X_Y.png` — screenshots em grade cobrindo toda a base
+   - `map_X_Y.png` — screenshots cobrindo toda a base (geralmente 1–4 imagens)
 
 4. Exibir uma mensagem no chat quando a exportação concluir:
    ```
-   [AI Exporter] Export complete. 847 entities | 12 screenshots → script-output/ai-export/
+   [AI Exporter] Export complete. 458 entities | 1 screenshots → script-output/ai-export/
    ```
 
 > O diretório `script-output/` fica dentro do diretório de dados do Factorio (mesmo lugar que os mods).
@@ -106,8 +106,7 @@ cat context.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(js
     }
   ],
   "screenshots": [
-    "script-output/ai-export/map_0_0.png",
-    "script-output/ai-export/map_2048_0.png"
+    "script-output/ai-export/map_-40_299.png"
   ]
 }
 ```
@@ -210,14 +209,16 @@ Itera `game.forces.player.technologies` e separa em dois grupos:
 
 ### `export/screenshot.lua` — cobertura visual da base
 
-Não existe `take_map_screenshot` na API do Factorio. O workaround é uma grade de chamadas `game.take_screenshot`:
+Não existe `take_map_screenshot` na API do Factorio. O workaround é uma série de chamadas `game.take_screenshot` com zoom adaptativo:
 
-1. Recebe o `bounding_box` das entidades.
-2. Divide em tiles de `2048 × 2048` unidades do mapa.
-3. Para cada tile, dispara um screenshot com `zoom = 0.5` e resolução `2048×2048 px`, centrado no meio do tile.
-4. Retorna a lista de paths gerados (com prefixo `script-output/`).
+1. Recebe o `bounding_box` das entidades (com padding de 64 unidades).
+2. Calcula o zoom ideal para caber toda a fábrica em **1 screenshot** (`zoom = RESOLUTION / (max_side × 32)`).
+3. Clipa o zoom entre `MIN_ZOOM = 0.1` e `MAX_ZOOM = 1.0`.
+4. Deriva o tamanho de cada tile: `tile_size = floor(RESOLUTION / (zoom × 32))`. Essa é a fórmula crítica — garante que os tiles se encaixam sem gaps.
+5. Tila o bounding box com passos de `tile_size`, começando a partir do `bbox.left_top` (não do grid global).
+6. Retorna a lista de paths gerados (com prefixo `script-output/`).
 
-Com `zoom = 0.5`, cada pixel cobre 2 unidades de mapa, então cada screenshot cobre uma área de `4096 × 4096` unidades — suficiente para ver detalhes de máquinas individuais sem ser tão próximo que gere dezenas de tiles.
+**Resultado típico:** bases de mid/late game cabem em 1–4 screenshots de 4096×4096 px. O nome do arquivo usa as coordenadas do centro de cada tile (`map_X_Y.png`).
 
 > Screenshots são ignoradas silenciosamente em modo headless (servidor dedicado sem display). O JSON ainda é gerado normalmente.
 

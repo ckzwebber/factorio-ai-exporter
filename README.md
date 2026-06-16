@@ -1,69 +1,41 @@
 # factorio-ai-exporter
 
-Mod para Factorio 2.x que exporta o estado completo da sua fábrica em um arquivo JSON estruturado + screenshots cobrindo toda a base. O objetivo é gerar contexto rico o suficiente para colar numa conversa com um modelo de IA (ChatGPT, Claude, etc.) e receber análises contextualizadas sobre gargalos, uso de módulos, layout, pesquisa, etc.
+Factorio 2.x mod that exports your factory state as a structured JSON file plus map screenshots covering the entire base. Designed to generate rich context for AI analysis — paste the output into a conversation and ask about bottlenecks, module efficiency, research priorities, layout, and so on.
 
----
+## Installation
 
-## Instalação
+Copy the `factorio-ai-exporter/` folder (the one containing `info.json`) to Factorio's mods directory:
 
-1. Copie a pasta `factorio-ai-exporter/` (a que contém `info.json`) para o diretório de mods do Factorio:
+| OS      | Path |
+|---------|------|
+| Windows | `%APPDATA%\Factorio\mods\` |
+| macOS   | `~/Library/Application Support/factorio/mods/` |
+| Linux   | `~/.factorio/mods/` |
 
-   | Sistema        | Caminho                                              |
-   | -------------- | ---------------------------------------------------- |
-   | Windows        | `%APPDATA%\Factorio\mods\`                           |
-   | macOS          | `~/Library/Application Support/factorio/mods/`      |
-   | Linux          | `~/.factorio/mods/`                                  |
+Enable **AI Exporter** from the in-game Mods screen.
 
-2. Inicie o Factorio, vá em **Mods** e certifique-se de que **AI Exporter** está ativado.
+## Usage
 
-3. Carregue um save existente ou inicie uma nova partida.
-
----
-
-## Como usar
-
-No console do jogo (tecla **`** ou **~**), execute:
+Open the in-game console (`` ` `` or `~`) and run:
 
 ```
 /ai-export
 ```
 
-O mod vai:
+The mod scans all explored chunks asynchronously (5 chunks per tick to avoid lag spikes) and writes to `script-output/ai-export/`:
 
-1. Iniciar a varredura assíncrona de todos os chunks explorados da superfície atual.
-2. Processar 5 chunks por tick para não causar lag.
-3. Ao terminar, gerar os arquivos em `script-output/ai-export/`:
-   - `context.json` — dados completos da fábrica
-   - `map_X_Y.png` — screenshots cobrindo toda a base (geralmente 1–4 imagens)
+- `context.json` — full factory state
+- `map_X_Y.png` — screenshots covering the entire base (typically 1–4 images)
 
-4. Exibir uma mensagem no chat quando a exportação concluir:
-   ```
-   [AI Exporter] Export complete. 458 entities | 1 screenshots → script-output/ai-export/
-   ```
+A chat message confirms when the export is complete:
 
-> O diretório `script-output/` fica dentro do diretório de dados do Factorio (mesmo lugar que os mods).
-
----
-
-## Usando o JSON com uma IA
-
-Cole o conteúdo de `context.json` numa conversa e faça perguntas como:
-
-- *"Quais são os principais gargalos de produção que você identifica?"*
-- *"Estou produzindo circuitos avançados mas o consumo está maior que a produção — o que pode estar causando isso?"*
-- *"Com base nas tecnologias pesquisadas, o que eu deveria priorizar agora?"*
-- *"Quais montadoras estão com configuração de módulos abaixo do ideal?"*
-
-Para arquivos grandes (bases maiores), você pode extrair só uma seção do JSON:
-
-```bash
-# Apenas as estatísticas de produção
-cat context.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d['production_stats'], indent=2))"
+```
+[AI Exporter] Export complete. 458 entities | 1 screenshots → script-output/ai-export/
 ```
 
----
+> `script-output/` lives inside the Factorio data directory, alongside the mods folder.
 
-## Estrutura do JSON de saída
+## JSON structure
 
 ```json
 {
@@ -96,166 +68,54 @@ cat context.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(js
       "modules": ["productivity-module", "productivity-module", "speed-module", "speed-module"],
       "crafting_speed": 1.25,
       "productivity_bonus": 0.2
-    },
-    {
-      "type": "mining-drill",
-      "name": "electric-mining-drill",
-      "position": { "x": -300, "y": 120 },
-      "resource": "iron-ore",
-      "modules": ["efficiency-module"]
     }
   ],
-  "screenshots": [
-    "script-output/ai-export/map_-40_299.png"
-  ]
+  "screenshots": ["script-output/ai-export/map_-40_299.png"]
 }
 ```
 
----
+For large bases, you can extract a single section before pasting into an AI:
 
-## Guia para desenvolvedores
+```bash
+cat context.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d['production_stats'], indent=2))"
+```
 
-### Mapa de arquivos
+## Architecture
 
 ```
 factorio-ai-exporter/
-├── info.json             # Metadados do mod (nome, versão, dependências)
-├── control.lua           # Entry point: comandos, eventos, orquestração
-├── export/
-│   ├── entities.lua      # Coleta e serializa entidades do surface
-│   ├── stats.lua         # Lê LuaFlowStatistics (produção/consumo)
-│   ├── research.lua      # Lista tecnologias pesquisadas e em andamento
-│   └── screenshot.lua    # Dispara take_screenshot em grade
-└── util/
-    ├── json.lua          # Serialização Lua → JSON (sem dependências)
-    └── chunks.lua        # Fila assíncrona de chunks com storage
+  info.json         # Mod metadata
+  control.lua       # Entry point: command registration, orchestration, finish_export
+  export/
+    entities.lua    # Entity collection and serialization
+    stats.lua       # LuaFlowStatistics (production/consumption rates)
+    research.lua    # Completed and in-progress technologies
+    screenshot.lua  # Tiled map screenshots
+  util/
+    json.lua        # Lua-to-JSON serialization (no dependencies)
+    chunks.lua      # Async chunk queue with storage persistence
 ```
 
----
+### Key implementation notes
 
-### `control.lua` — orquestrador central
+**Async chunk processing (`util/chunks.lua`):** scanning a large surface in a single tick causes a noticeable lag spike. The export divides the surface into 32×32 tile chunks and processes `CHUNKS_PER_TICK = 5` per tick. Progress is stored in `storage.ai_export`, so an export survives save/load without restarting.
 
-É o único arquivo carregado diretamente pelo Factorio (declarado implicitamente por ser o entry point padrão do runtime). Ele:
+**Entity collection (`export/entities.lua`):** collects assemblers, furnaces, mining drills, beacons, labs, rocket silos, train stops, and roboports. Each `LuaEntity` reference is validated before use (`entity.valid`) to discard anything destroyed between ticks.
 
-- Registra o comando `/ai-export` via `commands.add_command`.
-- Quando o comando é executado, chama `chunks.start_export(surface)` para inicializar a fila.
-- Registra um handler `on_tick` que chama `chunks.process_tick()` a cada tick enquanto a exportação estiver ativa.
-- Quando `process_tick` retorna `true` (fila vazia), chama `finish_export()` que agrega todos os dados, serializa em JSON, escreve em disco, dispara os screenshots e notifica o jogador.
+**Production stats (`export/stats.lua`):** reads `LuaFlowStatistics` from the player force. Exposes total counts plus per-item rates at 1-minute and 1-hour windows via `defines.flow_precision_index`.
 
-O estado de progresso fica em `storage.ai_export` (tabela global persistente), então o export sobrevive a save/load sem recomeçar do zero.
+**Screenshots (`export/screenshot.lua`):** uses tiled `game.take_screenshot` calls since no single map screenshot API exists. Zoom is derived from the entity bounding box to fit the whole base, clamped between `MIN_ZOOM = 0.1` and `MAX_ZOOM = 1.0`. Silently skipped in headless/dedicated server mode — JSON is still generated normally.
 
----
+**JSON serialization (`util/json.lua`):** custom implementation with no external dependencies. Handles string escaping, floats (`%.10g`), NaN/Infinity as `null`, and array vs. object distinction via consecutive integer key check.
 
-### `util/chunks.lua` — processamento assíncrono
+## Known limitations
 
-O problema: `surface.find_entities_filtered` numa área enorme em um único tick causa um lag spike perceptível. A solução é dividir o surface em chunks de 32×32 tiles e processar `CHUNKS_PER_TICK = 5` por tick.
+- Screenshots are skipped on dedicated servers (headless mode).
+- Only the 8 built-in entity types are collected; unknown types are silently ignored.
+- Ghost entities (unplaced blueprints) are excluded by default.
+- Multi-surface (Space Age): export runs on the surface the player is currently on.
+- Large bases (2000+ entities) may produce 1–2 MB JSON files, which can exceed the context window of smaller models.
 
-**Fluxo:**
+## License
 
-```
-start_export(surface)
-  └─ itera surface.get_chunks() → monta queue = [{x,y}, ...]
-  └─ salva queue + index = 1 em storage.ai_export
-
-on_tick → process_tick(surface)
-  └─ processa chunks[index .. index+4]
-  └─ para cada chunk: find_entities_filtered na área do chunk
-  └─ acumula entidades válidas em storage.ai_export.entities
-  └─ avança index; retorna true quando index > #queue
-```
-
-As entidades são acumuladas como referências `LuaEntity` vivas. Antes de usar cada uma em `finish_export`, o código verifica `entity.valid` para descartar entidades destruídas entre ticks.
-
----
-
-### `export/entities.lua` — coleta de entidades
-
-Recebe a lista de `LuaEntity` acumulada pelo chunks e filtra pelos tipos relevantes (assembladoras, fornalhas, mineradoras, beacons, labs, silos, train-stops, roboports). Para cada entidade coletada, extrai:
-
-| Campo              | Como é obtido                              |
-| ------------------ | ------------------------------------------ |
-| `type`, `name`     | `entity.type`, `entity.name`               |
-| `position`         | `entity.position.{x,y}`                   |
-| `recipe`           | `entity.get_recipe().name` (com pcall)     |
-| `modules`          | `entity.get_module_inventory()` → nomes    |
-| `crafting_speed`   | `entity.crafting_speed`                    |
-| `productivity_bonus` | `entity.productivity_bonus`              |
-| `resource`         | `entity.mining_target.name` (drills)       |
-
-Também expõe `bounding_box(entity_list)` que calcula o menor retângulo que contém todas as entidades — usado pelo `screenshot.lua` para saber quantos tiles tirar.
-
----
-
-### `export/stats.lua` — estatísticas de produção
-
-Lê `LuaFlowStatistics` da força "player" para o surface exportado. Para cada item que aparece em `input_counts` ou `output_counts`, coleta:
-
-- `produced_total` / `consumed_total` — contadores históricos acumulados
-- `rate_1min_produced` / `rate_1min_consumed` — média do último minuto
-- `rate_1h_produced` / `rate_1h_consumed` — média da última hora
-
-As janelas são definidas via `defines.flow_precision_index` (enum interno do Factorio).
-
----
-
-### `export/research.lua` — tecnologias
-
-Itera `game.forces.player.technologies` e separa em dois grupos:
-
-- `completed`: todas com `tech.researched == true`, ordenadas alfabeticamente.
-- `in_progress`: nome da tecnologia sendo pesquisada no momento (via `force.current_research`).
-
----
-
-### `export/screenshot.lua` — cobertura visual da base
-
-Não existe `take_map_screenshot` na API do Factorio. O workaround é uma série de chamadas `game.take_screenshot` com zoom adaptativo:
-
-1. Recebe o `bounding_box` das entidades (com padding de 64 unidades).
-2. Calcula o zoom ideal para caber toda a fábrica em **1 screenshot** (`zoom = RESOLUTION / (max_side × 32)`).
-3. Clipa o zoom entre `MIN_ZOOM = 0.1` e `MAX_ZOOM = 1.0`.
-4. Deriva o tamanho de cada tile: `tile_size = floor(RESOLUTION / (zoom × 32))`. Essa é a fórmula crítica — garante que os tiles se encaixam sem gaps.
-5. Tila o bounding box com passos de `tile_size`, começando a partir do `bbox.left_top` (não do grid global).
-6. Retorna a lista de paths gerados (com prefixo `script-output/`).
-
-**Resultado típico:** bases de mid/late game cabem em 1–4 screenshots de 4096×4096 px. O nome do arquivo usa as coordenadas do centro de cada tile (`map_X_Y.png`).
-
-> Screenshots são ignoradas silenciosamente em modo headless (servidor dedicado sem display). O JSON ainda é gerado normalmente.
-
----
-
-### `util/json.lua` — serialização
-
-Implementação própria sem dependências externas. Suporta:
-
-- `string` → com escape de `"`, `\`, `\n`, `\r`, `\t`, e caracteres de controle (`\uXXXX`)
-- `number` → inteiros sem casa decimal; floats com `%.10g`; NaN e Infinity viram `null`
-- `boolean` → `true` / `false`
-- `nil` → `null`
-- `table` densa (array) → `[...]`
-- `table` esparsa (objeto) → `{...}`
-
-A distinção array/objeto usa `is_array`: verifica se todas as chaves são inteiros consecutivos começando em 1, sem buracos.
-
----
-
-### Adicionando novos campos ao export
-
-**Novo tipo de entidade:** em `export/entities.lua`, adicione a chave em `COLLECTED_TYPES` e trate os campos dentro do bloco `if entity.valid and COLLECTED_TYPES[entity.type]`.
-
-**Nova janela de tempo nas stats:** em `export/stats.lua`, adicione uma entrada em `WINDOWS`:
-```lua
-{ key = "rate_10min", index = defines.flow_precision_index.ten_minutes },
-```
-
-**Campo novo no meta:** em `control.lua`, dentro de `finish_export`, adicione ao bloco `meta = { ... }`.
-
----
-
-## Limitações conhecidas
-
-- **Screenshots em headless:** `game.take_screenshot` é ignorado em servidores dedicados. O JSON é gerado normalmente.
-- **Mods de terceiros:** entidades de mods não-vanilla são coletadas normalmente se o tipo coincidir com um dos 8 tipos suportados. Tipos desconhecidos são ignorados silenciosamente.
-- **Entidades ghost:** não coletadas por padrão (blueprints não colocados ainda). Para incluí-las, adicione `"entity-ghost"` em `COLLECTED_TYPES` e trate o campo `ghost_name`.
-- **Superfícies múltiplas (Space Age):** o export roda na superfície onde o jogador está. Para exportar Vulcanus, Fulgora etc., fique na superfície desejada antes de executar `/ai-export`.
-- **Tamanho do JSON:** bases grandes (~2000+ entidades) podem gerar arquivos de 1–2 MB. Modelos com janela de contexto pequena podem precisar de um subconjunto do JSON.
+MIT
